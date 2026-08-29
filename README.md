@@ -65,6 +65,7 @@ agent-runner start \
   --model openai/gpt-5.6-sol \
   --auth-file /home/me/auth2.json \
   --agent-bin codex=/home/me/.local/bin/codex \
+  --agent-bin codex-code-mode-host=/home/me/.local/lib/codex-code-mode-host \
   --network allowlist \
   --allow-host api.openai.com \
   --allow-host auth.openai.com \
@@ -84,7 +85,9 @@ depend on Docker's default bridge. `allowlist` uses Harbor's nftables sidecar an
 routes its kernel probe through Docker's `none` namespace, so a host without the
 legacy `docker0` interface can still use per-trial Compose networking. Optional
 `--agent-bin NAME=PATH` mounts an already installed executable read-only and
-avoids granting package-manager egress merely to bootstrap an agent CLI. The
+avoids granting package-manager egress merely to bootstrap an agent CLI. Current
+standalone Codex packages need both `codex` and their matching
+`codex-code-mode-host` when Harbor enables unified execution. The
 allowlist provider also falls back to Docker's standard builder when the optional
 `buildx` plugin is unavailable.
 
