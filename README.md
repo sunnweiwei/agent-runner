@@ -141,7 +141,7 @@ RUN/
   snapshots/ID/
     manifest.json
     submission/            immutable evaluator input
-  harbor/                  development Harbor trial
+  harbor/                  uniquely named development Harbor trial
   evaluations/             independent verifier trials
 ```
 

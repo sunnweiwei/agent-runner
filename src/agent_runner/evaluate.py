@@ -16,6 +16,7 @@ from harbor.models.trial.config import (
 from harbor.trial.trial import Trial
 
 from .io import read_json, write_json_atomic
+from .naming import unique_trial_name
 from .snapshot import verify_snapshot
 from .task import require_separate_verifier, stage_task
 
@@ -69,7 +70,7 @@ async def _evaluate(
     snapshot_id = snapshot_dir.name
     config = TrialConfig(
         task=TaskConfig(path=runtime_task),
-        trial_name=f"evaluate-{snapshot_id[-20:]}",
+        trial_name=unique_trial_name("evaluate", output_dir),
         trials_dir=output_dir / "harbor",
         agent=AgentConfig(name="agent_runner.agents:ArtifactReplayAgent"),
         environment=EnvironmentConfig(

@@ -18,6 +18,7 @@ from harbor.trial.hooks import TrialEvent
 from harbor.trial.trial import Trial
 
 from .io import read_json, update_json
+from .naming import unique_trial_name
 from .snapshot import create_snapshot
 
 
@@ -96,7 +97,7 @@ async def run_worker(run_dir: Path) -> int:
 
     trial_config = TrialConfig(
         task=TaskConfig(path=Path(config["runtime_task_dir"])),
-        trial_name="development",
+        trial_name=unique_trial_name("development", run_dir),
         trials_dir=run_dir / "harbor",
         agent=AgentConfig(
             name=config["agent"],
