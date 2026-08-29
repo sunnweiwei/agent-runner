@@ -17,6 +17,7 @@ from .task import NetworkMode, stage_task, task_gpu_count, validate_task
 
 
 ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
+EXECUTABLE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.+-]*\Z")
 
 
 def _new_directory(path: Path) -> Path:
@@ -54,13 +55,17 @@ def start_run(
     development_image: str | None,
     verifier_image: str | None,
     auth_file: Path | None,
+    agent_bins: dict[str, str] | None = None,
     runtime_env: dict[str, str] | None = None,
     data_env_var: str = "FOLDBENCH_DATA_DIR",
+    duration_seconds: float | None = None,
 ) -> dict:
     task_dir = validate_task(task_dir)
     run_dir = _new_directory(run_dir)
     if snapshot_interval <= 0:
         raise ValueError("Snapshot interval must be positive")
+    if duration_seconds is not None and duration_seconds <= 0:
+        raise ValueError("Session duration must be positive")
     gpu_count = resolve_gpu_count(task_dir, gpus)
     data_path = data_dir.expanduser().resolve() if data_dir else None
     if not ENV_NAME.fullmatch(data_env_var):
@@ -69,6 +74,16 @@ def start_run(
         raise FileNotFoundError(f"Data directory does not exist: {data_path}")
     if auth_file is not None:
         auth_file = validate_auth_file(auth_file)
+    resolved_agent_bins: dict[str, str] = {}
+    for name, raw_path in (agent_bins or {}).items():
+        if not EXECUTABLE_NAME.fullmatch(name):
+            raise ValueError(f"Invalid agent executable name: {name}")
+        binary = Path(raw_path).expanduser().resolve()
+        if not binary.is_file():
+            raise FileNotFoundError(f"Agent executable does not exist: {binary}")
+        if not os.access(binary, os.X_OK):
+            raise PermissionError(f"Agent executable is not executable: {binary}")
+        resolved_agent_bins[name] = str(binary)
 
     runtime_task = stage_task(
         task_dir,
@@ -99,8 +114,10 @@ def start_run(
         "allowed_hosts": allowed_hosts,
         "gpus": gpu_count,
         "snapshot_interval": snapshot_interval,
+        "duration_seconds": duration_seconds,
         "development_image": development_image,
         "verifier_image": verifier_image,
+        "agent_bins": resolved_agent_bins,
         "runtime_env_names": sorted((runtime_env or {}).keys()),
     }
     # Authentication paths and environment values are intentionally not persisted.

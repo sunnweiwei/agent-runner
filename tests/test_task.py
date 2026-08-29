@@ -1,8 +1,10 @@
 from pathlib import Path
 
 import toml
+import pytest
 import yaml
 
+from agent_runner.session import start_run
 from agent_runner.task import stage_task
 
 
@@ -93,3 +95,23 @@ def test_stage_creates_compose_overlays_when_task_has_none(tmp_path: Path) -> No
         main = yaml.safe_load(path.read_text())["services"]["main"]
         assert main["network_mode"] == "none"
         assert main["deploy"]["resources"]["reservations"]["devices"][0]["count"] == 2
+
+
+def test_start_rejects_missing_agent_binary_before_launch(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError, match="Agent executable does not exist"):
+        start_run(
+            task_dir=fixture_task(tmp_path),
+            run_dir=tmp_path / "run",
+            data_dir=None,
+            agent="codex",
+            model="openai/test",
+            agent_kwargs={},
+            network="allowlist",
+            allowed_hosts=["api.example.com"],
+            gpus="0",
+            snapshot_interval=1,
+            development_image=None,
+            verifier_image=None,
+            auth_file=None,
+            agent_bins={"codex": str(tmp_path / "missing")},
+        )

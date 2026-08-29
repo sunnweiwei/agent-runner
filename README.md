@@ -64,8 +64,12 @@ agent-runner start \
   --agent codex \
   --model openai/gpt-5.6-sol \
   --auth-file /home/me/auth2.json \
+  --agent-bin codex=/home/me/.local/bin/codex \
   --network allowlist \
   --allow-host api.openai.com \
+  --allow-host auth.openai.com \
+  --allow-host chatgpt.com \
+  --duration-hours 24 \
   --gpus task
 ```
 
@@ -77,7 +81,14 @@ worker but are not stored in `run.json` or mounted into the model workspace.
 
 For `no-network`, the staged Compose files use `network_mode: none`; this does not
 depend on Docker's default bridge. `allowlist` uses Harbor's nftables sidecar and
-therefore requires the host's ordinary Docker bridge/network stack to work.
+routes its kernel probe through Docker's `none` namespace, so a host without the
+legacy `docker0` interface can still use per-trial Compose networking. Optional
+`--agent-bin NAME=PATH` mounts an already installed executable read-only and
+avoids granting package-manager egress merely to bootstrap an agent CLI.
+
+`--duration-hours` limits the entire detached session by wall clock. At the
+deadline the worker gracefully stops Harbor, publishes a final stable snapshot,
+and records `stop_reason: duration_elapsed` in `state.json`.
 
 Harbor's local Docker provider does not translate task GPU metadata into Compose
 device requests. The runner therefore stages a private task copy and adds the

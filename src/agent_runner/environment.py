@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+import subprocess
 
 from harbor.environments.capabilities import EnvironmentCapabilities
 from harbor.environments.docker.docker import DockerEnvironment
@@ -33,3 +34,38 @@ class NoNetworkDockerEnvironment(DockerEnvironment):
             mounted=True,
             docker_compose=True,
         )
+
+
+class AllowlistDockerEnvironment(DockerEnvironment):
+    """Use Harbor allowlists when Docker's legacy default bridge is absent.
+
+    Harbor's kernel probe needs no network, but upstream runs it on Docker's
+    default ``bridge``. Some shared GPU hosts keep that network object while
+    omitting its ``docker0`` interface; ordinary Compose networks still work.
+    Running the same probe in Docker's ``none`` namespace avoids that false
+    negative, after which Harbor's normal nftables egress sidecar is unchanged.
+    """
+
+    @staticmethod
+    def _egress_control_kernel_support() -> bool:
+        try:
+            result = subprocess.run(
+                [
+                    "docker",
+                    "container",
+                    "run",
+                    "--network",
+                    "none",
+                    "--rm",
+                    DockerEnvironment._EGRESS_CONTROL_KERNEL_PROBE_IMAGE,
+                    "sh",
+                    "-c",
+                    DockerEnvironment._EGRESS_CONTROL_KERNEL_PROBE_SCRIPT,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+        except Exception:
+            return False
+        return result.returncode == 0

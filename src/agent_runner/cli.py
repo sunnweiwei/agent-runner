@@ -55,6 +55,14 @@ def parser() -> argparse.ArgumentParser:
     start.add_argument("--model")
     start.add_argument("--agent-kwarg", type=_key_value, action="append", default=[])
     start.add_argument("--auth-file", type=Path)
+    start.add_argument(
+        "--agent-bin",
+        type=_key_value,
+        action="append",
+        default=[],
+        metavar="NAME=PATH",
+        help="Mount an operator-supplied executable at /usr/local/bin/NAME",
+    )
     start.add_argument("--env", type=_key_value, action="append", default=[])
     start.add_argument(
         "--network",
@@ -64,6 +72,11 @@ def parser() -> argparse.ArgumentParser:
     start.add_argument("--allow-host", action="append", default=[])
     start.add_argument("--gpus", default="task")
     start.add_argument("--snapshot-interval", type=float, default=5.0)
+    start.add_argument(
+        "--duration-hours",
+        type=float,
+        help="Stop the complete session after this many wall-clock hours",
+    )
     start.add_argument("--development-image")
     start.add_argument("--verifier-image")
 
@@ -122,8 +135,14 @@ def main(argv: list[str] | None = None) -> None:
                 development_image=args.development_image,
                 verifier_image=args.verifier_image,
                 auth_file=args.auth_file,
+                agent_bins=_mapping(args.agent_bin),
                 runtime_env=_mapping(args.env),
                 data_env_var=args.data_env_var,
+                duration_seconds=(
+                    args.duration_hours * 3600
+                    if args.duration_hours is not None
+                    else None
+                ),
             )
             _print(record)
         elif args.command == "status":

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import os
 from pathlib import Path
 import signal
@@ -44,9 +44,30 @@ async def _snapshot_loop(run_dir: Path, interval: float, stop: asyncio.Event) ->
 async def run_worker(run_dir: Path) -> int:
     config = read_json(run_dir / "run.json")
     stop = asyncio.Event()
+    stop_reason: dict[str, str | None] = {"value": None}
     loop = asyncio.get_running_loop()
+
+    def request_stop(reason: str) -> None:
+        if not stop.is_set():
+            stop_reason["value"] = reason
+            stop.set()
+
     for signum in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(signum, stop.set)
+        loop.add_signal_handler(
+            signum,
+            request_stop,
+            f"signal:{signal.Signals(signum).name}",
+        )
+
+    duration_seconds = config.get("duration_seconds")
+    deadline_handle = None
+    if duration_seconds is not None:
+        duration_seconds = float(duration_seconds)
+        deadline = datetime.now(timezone.utc) + timedelta(seconds=duration_seconds)
+        update_json(run_dir / "state.json", deadline_at=deadline.isoformat())
+        deadline_handle = loop.call_later(
+            duration_seconds, request_stop, "duration_elapsed"
+        )
 
     mounts = [
         {
@@ -56,6 +77,23 @@ async def run_worker(run_dir: Path) -> int:
             "bind": {"create_host_path": False},
         }
     ]
+    for name, source in (config.get("agent_bins") or {}).items():
+        mounts.append(
+            {
+                "type": "bind",
+                "source": source,
+                "target": f"/usr/local/bin/{name}",
+                "read_only": True,
+                "bind": {"create_host_path": False},
+            }
+        )
+
+    environment_import = None
+    if config["network"] == "no-network":
+        environment_import = "agent_runner.environment:NoNetworkDockerEnvironment"
+    elif config["network"] == "allowlist":
+        environment_import = "agent_runner.environment:AllowlistDockerEnvironment"
+
     trial_config = TrialConfig(
         task=TaskConfig(path=Path(config["runtime_task_dir"])),
         trial_name="development",
@@ -66,11 +104,7 @@ async def run_worker(run_dir: Path) -> int:
             kwargs=config.get("agent_kwargs") or {},
         ),
         environment=EnvironmentConfig(
-            import_path=(
-                "agent_runner.environment:NoNetworkDockerEnvironment"
-                if config["network"] == "no-network"
-                else None
-            ),
+            import_path=environment_import,
             override_gpus=0,
             mounts=mounts,
             delete=True,
@@ -143,6 +177,8 @@ async def run_worker(run_dir: Path) -> int:
                 exception_type=type(error).__name__,
             )
     finally:
+        if deadline_handle is not None:
+            deadline_handle.cancel()
         stop.set()
         stop_task.cancel()
         await snapshot_task
@@ -150,7 +186,12 @@ async def run_worker(run_dir: Path) -> int:
             create_snapshot(run_dir / "live/submission", run_dir / "snapshots")
         except Exception:
             pass
-        update_json(run_dir / "state.json", status=status, finished_at=_now())
+        update_json(
+            run_dir / "state.json",
+            status=status,
+            finished_at=_now(),
+            stop_reason=stop_reason["value"],
+        )
     return exit_code
 
 
