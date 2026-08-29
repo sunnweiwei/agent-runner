@@ -84,7 +84,9 @@ depend on Docker's default bridge. `allowlist` uses Harbor's nftables sidecar an
 routes its kernel probe through Docker's `none` namespace, so a host without the
 legacy `docker0` interface can still use per-trial Compose networking. Optional
 `--agent-bin NAME=PATH` mounts an already installed executable read-only and
-avoids granting package-manager egress merely to bootstrap an agent CLI.
+avoids granting package-manager egress merely to bootstrap an agent CLI. The
+allowlist provider also falls back to Docker's standard builder when the optional
+`buildx` plugin is unavailable.
 
 `--duration-hours` limits the entire detached session by wall clock. At the
 deadline the worker gracefully stops Harbor, publishes a final stable snapshot,

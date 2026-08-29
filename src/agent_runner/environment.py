@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Sequence
 import subprocess
 
 from harbor.environments.capabilities import EnvironmentCapabilities
 from harbor.environments.docker.docker import DockerEnvironment
+from harbor.environments.docker.utils import default_docker_platform
 from harbor.models.task.config import NetworkPolicy
+from harbor.utils.container_cache import docker_build_context_hash
 
 
 class NoNetworkDockerEnvironment(DockerEnvironment):
@@ -69,3 +72,52 @@ class AllowlistDockerEnvironment(DockerEnvironment):
         except Exception:
             return False
         return result.returncode == 0
+
+    async def _ensure_egress_control_sidecar_image_built(self) -> None:
+        """Build Harbor's sidecar even when the optional buildx plugin is absent."""
+        buildx = subprocess.run(
+            ["docker", "buildx", "version"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if buildx.returncode == 0:
+            await super()._ensure_egress_control_sidecar_image_built()
+            return
+
+        context = self._EGRESS_CONTROL_SIDECAR_CONTEXT_PATH
+        dockerfile = self._egress_control_sidecar_dockerfile_path()
+        platform = await default_docker_platform()
+        digest = docker_build_context_hash(
+            context=context,
+            dockerfile_path=dockerfile,
+            build_args={},
+            platform=platform,
+        )
+        image = f"{self._EGRESS_CONTROL_SIDECAR_DOCKER_NAME}--{digest}"
+        inspect = await asyncio.create_subprocess_exec(
+            "docker",
+            "image",
+            "inspect",
+            image,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        if await inspect.wait() != 0:
+            build = await asyncio.create_subprocess_exec(
+                "docker",
+                "build",
+                f"--file={dockerfile}",
+                f"--platform={platform}",
+                f"--tag={image}",
+                str(context),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            stdout, _ = await build.communicate()
+            if build.returncode != 0:
+                raise RuntimeError(
+                    "Failed to build Harbor egress sidecar with Docker's "
+                    f"standard builder: {stdout.decode(errors='replace')}"
+                )
+        self._env_vars.egress_control_sidecar_image_name = image
