@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Sequence
+from pathlib import Path
+import shutil
 import subprocess
+import tempfile
 
 from harbor.environments.capabilities import EnvironmentCapabilities
 from harbor.environments.docker.docker import DockerEnvironment
@@ -104,20 +107,34 @@ class AllowlistDockerEnvironment(DockerEnvironment):
             stderr=asyncio.subprocess.DEVNULL,
         )
         if await inspect.wait() != 0:
-            build = await asyncio.create_subprocess_exec(
-                "docker",
-                "build",
-                f"--file={dockerfile}",
-                f"--platform={platform}",
-                f"--tag={image}",
-                str(context),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-            )
-            stdout, _ = await build.communicate()
-            if build.returncode != 0:
-                raise RuntimeError(
-                    "Failed to build Harbor egress sidecar with Docker's "
-                    f"standard builder: {stdout.decode(errors='replace')}"
+            # Harbor's pinned Dockerfile uses BuildKit-only COPY --chmod. Make
+            # an equivalent temporary context for Docker's legacy builder.
+            with tempfile.TemporaryDirectory() as temporary:
+                portable_context = Path(temporary) / "context"
+                shutil.copytree(context, portable_context)
+                portable_dockerfile = portable_context / "Dockerfile"
+                portable = portable_dockerfile.read_text()
+                portable = portable.replace("COPY --chmod=755 ", "COPY ")
+                portable += (
+                    "\nRUN chmod 755 /opt/egress-sidecar/entrypoint.sh "
+                    "/usr/local/bin/network-policy\n"
                 )
+                portable_dockerfile.write_text(portable)
+                build = await asyncio.create_subprocess_exec(
+                    "docker",
+                    "build",
+                    "--network=none",
+                    f"--file={portable_dockerfile}",
+                    f"--platform={platform}",
+                    f"--tag={image}",
+                    str(portable_context),
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.STDOUT,
+                )
+                stdout, _ = await build.communicate()
+                if build.returncode != 0:
+                    raise RuntimeError(
+                        "Failed to build Harbor egress sidecar with Docker's "
+                        f"standard builder: {stdout.decode(errors='replace')}"
+                    )
         self._env_vars.egress_control_sidecar_image_name = image
